@@ -5,58 +5,76 @@
  * @author December 12, 2022
  */
 #include "step.h"
+
 // #include <Arduino.h>
 
 /**
  * Stepper class constructor 
  */
-Stepper::Stepper (int _step_pin, 
-                  int _dir_pin,  
-                  int encoderResolution, 
-                  int _motor_id,
-                  bool _closed_loop) 
+Stepper::Stepper(
+    int8_t motor_ID_In,
+    bool closedLoop_In,
+    int8_t stepPin_ID_In,
+    int8_t directionPin_ID_In,
+    int8_t encoderPinA_ID_In,
+    int8_t encoderPinB_ID_In,
+    int encoderResolution_In
+  ): encoder(encoderPinA_ID_In, encoderPinB_ID_In)
 {
-  step_pin = _step_pin;
-  dir_pin = _dir_pin;
-  encoder_resolution = encoderResolution;
-  motor_id = _motor_id;
-  closed_loop = _closed_loop;
+  motor_ID = motor_ID_In;
+  closedLoop = closedLoop_In;
+  stepPin_ID = stepPin_ID_In;
+  directionPin_ID = directionPin_ID_In;
+  encoderPinA_ID = encoderPinA_ID_In;     //TODO: Dont think you need dis if you make encoder later
+  encoderPinB_ID_In = encoderPinB_ID_In;
+  encoderResolution = encoderResolution_In;
+
+  currentAngle = 0;
+  positionCommand = 0;
+  econderPosition = 0;
 
   proportional_gain = 0.3;
   integral_gain = 0.5;
   derivative_gain = 0.01;
   max_integral = 1;
 
-  pinMode(step_pin, OUTPUT);
-  pinMode(dir_pin, OUTPUT);
-}
+  pinMode(stepPin_ID, OUTPUT);
+  pinMode(directionPin_ID, OUTPUT);
 
+  tasks.state = false;
+  tasks.elapsedTime = 0;
+  tasks.period = 1000000;
+    
+
+  if (closedLoop)
+    encoder.write(0);
+}
 
 /**
  * Advances the state of the step pin 
  * 
  * @return - none
  */
-void Stepper::step () 
+void Stepper::step() 
 {
   if (!highLow) 
   {
     if (direction == HIGH) 
     {
-      digitalWrite(dir_pin, HIGH);
-      digitalWrite(step_pin, HIGH);
+      digitalWrite(directionPin_ID, HIGH);
+      digitalWrite(stepPin_ID, HIGH);
     }
     else 
     {
-      digitalWrite(dir_pin, LOW);
-      digitalWrite(step_pin, HIGH);
+      digitalWrite(directionPin_ID, LOW);
+      digitalWrite(stepPin_ID, HIGH);
     }
 
     highLow = HIGH;
   }
   else 
   {
-    digitalWrite(step_pin, LOW);
+    digitalWrite(stepPin_ID, LOW);
     highLow = LOW;
   }
 }
@@ -111,19 +129,19 @@ double Stepper::pid_controller(double desired_angle, double current_pos)
  */
 int Stepper::deg_to_step(int deg) 
 {
-  if (motor_id == 7 || motor_id == 8 ) 
+  if (motor_ID == 7 || motor_ID == 8 ) 
   {
     int temp_val = ( 1 / 360.0 );
     return temp_val * deg;
   } 
-  else if (motor_id == 6 ) 
+  else if (motor_ID == 6 ) 
   {
-    int temp_val = ((encoder_resolution * 4.0 ) / 360.0);
+    int temp_val = ((encoderResolution * 4.0 ) / 360.0);
     return temp_val * deg;
   }
   else
   {
-    int temp_val = ((encoder_resolution * 4.0 * 7.0 ) / 360.0);
+    int temp_val = ((encoderResolution * 4.0 * 7.0 ) / 360.0);
     return temp_val * deg;
   } 
 }
@@ -146,8 +164,7 @@ int Stepper::newFrequency(double position, double desired_position)
   velocity = pid_controller(desired_position, position);
 
 
-  /** TODO: Modify these based on motor polarity */
-  if ( motor_id == 1 || motor_id == 2 || motor_id == 4 || motor_id == 6) // Joints 1,2,4,6
+  if (true) // All Joints  (put motor_ID == 1 if you need to flip motor 1 polarity)
   {  
     if (velocity > 0) 
     {
@@ -187,3 +204,77 @@ int Stepper::newFrequency(double position, double desired_position)
 
   return motorFrequency;
 }
+
+int32_t Stepper::getEncoder()
+{
+  return encoder.read();
+}
+
+void Stepper::read_encoders()
+{ 
+  if(closedLoop) {
+    econderPosition = getEncoder();
+  }
+  else{
+    econderPosition = currentAngle;  
+  }
+}
+
+void Stepper::motor_task()
+{
+  econderPosition = get_position();
+  if (motor_ID == 6) 
+    tasks.period = newFrequency(get_position(), positionCommand * 10);
+  else
+    tasks.period = newFrequency(get_position(), positionCommand);
+
+
+}
+
+void Stepper::stepCheck()
+{
+  if (tasks.period == 0) 
+  {
+    return;
+  }
+
+  //increase the elapsed time since the last time the function was called
+  tasks.elapsedTime += 10;
+
+  if (tasks.elapsedTime >= tasks.period) 
+  {
+    step();       //call the step function
+    tasks.elapsedTime = 0;  //reset the elapsed time
+
+    if (motor_ID == 7)  // speicial *10 for special joint 7 funcitnallity, ask Elias, this is his stuipid work around, cuz he's to lazy to fix it as of right now, what a bum
+    {
+      if ((positionCommand * 10) - currentAngle > 0.5)  // will have an error buffer of .5 in either direction
+      {
+        currentAngle++;
+      } else if ((positionCommand * 10) - currentAngle < -0.5) {
+        currentAngle--;
+      }
+    } else if (!closedLoop)  // ajust angle of closed loop joints
+    {
+      if (positionCommand - currentAngle > 0.5)  // will have an error buffer of .5 in either direction
+      {
+        currentAngle++;
+      } else if (positionCommand - currentAngle < -0.5) {
+        currentAngle--;
+      }
+    }
+  }
+}
+
+
+int Stepper::get_position()
+{
+  if (motor_ID < 5)   // closed loop
+    return getEncoder();
+  else if (motor_ID == 6)           // speicial command for joint 7, that allows it to get to the desired position, which is outside the current limit of the communcated values 
+    return currentAngle; 
+  else                                // open loop
+    return currentAngle;
+}
+
+

@@ -1,121 +1,44 @@
 #include <Arduino.h>
 #include "teensy_comm.h"
 #include "step.h"
-#include "Encoder.h"
 #include <TimerOne.h>
 #include <imxrt.h> // Make sure Teensy core libraries are included
 
-#define enc_pin_1A 14
-#define enc_pin_2A 16
-#define enc_pin_3A 18
-#define enc_pin_4A 21
-#define enc_pin_5A 23
-#define enc_pin_6A 25
-#define enc_pin_7A 0
-#define enc_pin_8A 0
-
-#define enc_pin_1B 15
-#define enc_pin_2B 17
-#define enc_pin_3B 19
-#define enc_pin_4B 20
-#define enc_pin_5B 22
-#define enc_pin_6B 24
-#define enc_pin_7B 0
-#define enc_pin_8B 0
-
-#define step_pin_1 3 
-#define step_pin_2 5 
-#define step_pin_3 7
-#define step_pin_4 9
-#define step_pin_5 11
-#define step_pin_6 13
-
-#define step_pin_extend_launcher 28
-#define step_pin_launch_ball 37
-
-#define dir_pin_1 2
-#define dir_pin_2 4
-#define dir_pin_3 6
-#define dir_pin_4 8
-#define dir_pin_5 10
-#define dir_pin_6 12
-
-#define dir_pin_extend_launcher 29
-#define dir_pin_launch_ball 36
-
-//    Zeroing pin will be in pins 39,40, and 41
-#define lim_switch_a 39
-#define lim_switch_b 40
-#define lim_switch_c 41
-
-#define zeroing_timout_value 2000
-
-
-int32_t position_cmds[NUM_JOINTS];
-int32_t encoder_positions[NUM_JOINTS];
-int prevEncoderPos = 0;
+#define LIMIT_SWITCH_PIN 39
+#define zeroing_timout_value 8000
 
 static teensy_status_t tnsy_sts = {0};
 static teensy_command_t tnsy_cmd = {0};
 static teensy_zero_t tnsy_zero = {0};
 static teensy_header_t tnsy_hdr = {0};
 
-typedef struct TaskScheduler 
-{
-  bool state;
-  volatile int elapsedTime;
-  int period;
-  void (*function)();
-} scheduledTasks;
+int32_t position_cmds[NUM_JOINTS];
 
-scheduledTasks tasks[NUM_JOINTS];
-
-// how many ISR cycles to stay on
-const int m1_OnTime = 1;
-const int m2_OnTime = 1;
-const int m3_OnTime = 1;
-const int m4_OnTime = 1;
-const int m5_OnTime = 1;
-const int m6_OnTime = 1;
-const int m7_OnTime = 1;
-const int m8_OnTime = 1;
-
-//period between the functions in
-const int m1_period = 0;
-const int m2_period = 0;
-const int m3_period = 0;
-const int m4_period = 0;
-const int m5_period = 0;
-const int m6_period = 0;
-const int m7_period = 0;
-const int m8_period = 0;
-
+/*  Stepper Contructor:
+Stepper::Stepper(
+    int8_t motor_ID_In,
+    bool closedLoop_In,
+    int8_t stepPin_ID_In,
+    int8_t directionPin_ID_In,
+    int8_t encoderPinA_ID_In,
+    int8_t encoderPinB_ID_In,
+    int encoderResolution_In
+  )
+  */
 Stepper myStepper[] = 
-{ 
-  Stepper(step_pin_1, dir_pin_1, 1000,  1, 1),
-  Stepper(step_pin_2, dir_pin_2, 300,   2, 1),
-  Stepper(step_pin_3, dir_pin_3, 1000,  3, 1),
-  Stepper(step_pin_4, dir_pin_4, 300,   4, 1),
-  Stepper(step_pin_5, dir_pin_5, 1000,  5, 1),
-  Stepper(step_pin_6, dir_pin_6, 300,   6, 0),
-  Stepper(step_pin_extend_launcher, dir_pin_extend_launcher,  1, 7, 0),
-  Stepper(step_pin_launch_ball, dir_pin_launch_ball,          1, 8, 0)
+{//      motor_ID   ClosedLoop    stepPin   dirPin    encoderPin_A    encoderPin_B  encoderRes.
+  Stepper(1,        1,            3,        2,        14,             15,           1000  ),
+  Stepper(2,        1,            5,        4,        16,             17,           300   ),
+  Stepper(3,        1,            7,        6,        18,             19,           1000  ), 
+  Stepper(4,        1,            9,        8,        21,             20,           300   ),
+  Stepper(5,        1,            11,       10,       23,             22,           1000  ),
+  Stepper(6,        1,            13,       12,       25,             24,           300   ),
+  Stepper(7,        1,            28,       29,       27,             26,           1000  ),
+  Stepper(8,        1,            28,       29,       27,             26,           1000  )
 };
 
-
-Encoder myEncoder[] = { 
-  Encoder(enc_pin_1A, enc_pin_1B),
-  Encoder(enc_pin_2A, enc_pin_2B),
-  Encoder(enc_pin_3A, enc_pin_3B),
-  Encoder(enc_pin_4A, enc_pin_4B),
-  Encoder(enc_pin_5A, enc_pin_5B),
-  Encoder(enc_pin_6A, enc_pin_6B)
-  // Encoder(enc_pin_7A, enc_pin_7B)};
-  // Encoder(enc_pin_8A, enc_pin_8B)};
-};
 
 //****************************************    High Level Code       ****************************************
-
 
 /**
  * Calls setup and loop 
@@ -123,13 +46,44 @@ Encoder myEncoder[] = {
 int main(void) 
 {
   setup();
-  //motor_test(8, 10);   // (motor_choice, speed)  // motor_choice is 1-8, not 0-7
-  delay(8000);
-  zeroing();
-  //new_pos(1, 100000);
+  //zeroing();
+
   loop();
 }
 
+/**
+ * L O O P
+ * 
+ * Receives serial commands from Jetson on serial port 1, updates the motor 
+ * position setpoints, reads encoder positions, and sends status serial message
+ * back to Jetson.
+ */
+void loop(void) 
+{
+  while (1)
+  {
+    // Serial Receive
+    receive_command();
+
+    // Read Encoders
+    read_encoders();
+
+    motor_task();
+
+    // Serial Send
+    send_status();
+
+    print_encoder_values();
+    print_target_values();
+    Serial.println(" ");
+
+    delay(10);
+  
+  }
+}
+
+
+//****************************************    Low Level Code       ****************************************
 
 /**
  * S E T U P
@@ -145,20 +99,6 @@ void setup(void) {
 
   noInterrupts();
   pinMode(13, OUTPUT);
-  initEncoders();
-
-  for (int ii = 0; ii < NUM_JOINTS; ++ii) 
-  {
-    tasks[ii].state = false;
-    tasks[ii].elapsedTime = 0;
-    tasks[ii].period = 1000000;
-    
-    // dont init the last two encoders
-    if (myStepper[ii].motor_id == 7 || myStepper[ii].motor_id == 8)   // if (myStepper[ii].closed_loop)
-    {
-      position_cmds[ii] = 0;
-    }
-  }       
 
   Timer1.initialize(10);             // interrupt every 10 us
   Timer1.attachInterrupt(motorISR);  // motorISR is the ISR
@@ -172,71 +112,14 @@ void setup(void) {
   interrupts();
 }
 
-
-/**
- * L O O P
- * 
- * Receives serial commands from Jetson on serial port 1, updates the motor 
- * position setpoints, reads encoder positions, and sends status serial message
- * back to Jetson.
- */
-
-void loop(void) 
-{
-  while (1)
-  {
-    // Serial Receive
-    receive_command();
-
-    // Read Encoders
-    //read_encoders();
-
-    motor_task();
-
-    // Serial Send
-    send_status();
-/*
-    for (int ii = 0; ii < NUM_JOINTS; ++ii) 
-    {
-      if (myStepper[ii].closed_loop)  // closed loop
-      {
-        tasks[ii].period = myStepper[ii].newFrequency(myEncoder[ii].read(), position_cmds[ii]);
-      //Serial.printf("motor %d  period = %lu µs\n", ii, tasks[ii].period);
-      }
-      else if (ii == 6)  // speicial command for joint 7, that allows it to get to the desired position, which is outside the current limit of the communcated values
-      {
-        tasks[ii].period = myStepper[ii].newFrequency(myStepper[ii].current_angle, position_cmds[ii] * 10);
-      }
-      else  // open loop
-      {
-        tasks[ii].period = myStepper[ii].newFrequency(myStepper[ii].current_angle, position_cmds[ii]);
-      }
-    }
-    */
-
-    print_encoder_values();
-    //print_target_values();
-
-    delay(10);
-  
-  }
-}
-
-
-//****************************************    Low Level Code       ****************************************
-
 /**
  * Reads the current position of all encoders into myStepper
  */
-void read_encoders() 
+void read_encoders() // TODO: Merge these 2 tings in a function
 { 
   for(int ii = 0; ii < NUM_JOINTS; ++ii) 
   { 
-    if (myStepper[ii].closed_loop)
-      encoder_positions[ii] = myEncoder[ii].read();
-
-    if (!myStepper[ii].closed_loop)
-      encoder_positions[ii] = myStepper[ii].current_angle;  
+    myStepper[ii].read_encoders();
   }
 }
 
@@ -244,44 +127,10 @@ void motor_task()
 {
   for (int ii = 0; ii < NUM_JOINTS; ++ii) 
   {
-    encoder_positions[ii] = get_position(ii);
-    tasks[ii].period = myStepper[ii].newFrequency(get_position(ii), position_cmds[ii]);
+    myStepper[ii].motor_task();
   }
 }
 
-int get_position(int motor)
-{
-  if (myStepper[motor].closed_loop)   // closed loop
-    return encoder_positions[motor] = myEncoder[motor].read();
-  else if (motor == 6)                // speicial command for joint 7, that allows it to get to the desired position, which is outside the current limit of the communcated values
-    return encoder_positions[motor] = myStepper[motor].current_angle * 10;
-  else                                // open loop
-    return encoder_positions[motor] = myStepper[motor].current_angle;
-}
-
-
-
-/**
- * Initializes all encoders to zero 
- */
-void initEncoders() 
-{
-  for (int kk = 0; kk < NUM_JOINTS; ++kk) 
-  {
-    if (myStepper[kk].closed_loop)
-      myEncoder[kk].write(0);
-
-    if (!myStepper[kk].closed_loop)
-      encoder_positions[kk] = 0;  
-  }
-}
-
-/**
- * Receives bytes on serial port and pareses messages. 
- * 
- * @return int - 0 success, -1 too many bytes read, -2 message parse error,
- *               OTHER: message type
- */
 int receive_command() 
 {
   uint8_t buffer[1024] = { 0 };
@@ -309,7 +158,7 @@ int receive_command()
       {
         for (int j = 0; j < NUM_JOINTS; ++j) 
         {
-          position_cmds[j] = tnsy_cmd.setpoint_position[j];
+          myStepper[j].positionCommand = tnsy_cmd.setpoint_position[j];
         }
         return 1;
       } 
@@ -409,7 +258,10 @@ int send_status (void)
 
   for (int ii = 0; ii < NUM_JOINTS; ii++) 
   {
-    tnsy_sts.encoder[ii] = encoder_positions[ii];
+    if (ii == 6)
+      tnsy_sts.encoder[ii] = (myStepper[ii].econderPosition / 10.0);
+    else
+      tnsy_sts.encoder[ii] = myStepper[ii].econderPosition;
   }
 
   memcpy(&buffer[0], &tnsy_sts, sizeof(tnsy_sts) - 2);
@@ -422,7 +274,6 @@ int send_status (void)
   return 0;
 }
 
-
 /** 
  * Interrupt Service Routine for stepping the motors at the correct rate and to
  * the correct position.
@@ -431,42 +282,7 @@ void motorISR(void)
 {
   for (int ii = 0; ii < NUM_JOINTS; ++ii) 
   {
-    if (tasks[ii].period == 0) 
-    {
-      continue;          
-    }
-
-    //increase the elapsed time since the last time the function was called
-    tasks[ii].elapsedTime += 10;
-
-    if (tasks[ii].elapsedTime >= tasks[ii].period) 
-    {
-      myStepper[ii].step();       //call the step function
-      tasks[ii].elapsedTime = 0;  //reset the elapsed time
-      
-      if (myStepper[ii].motor_id == 7) // speicial *10 for special joint 7 funcitnallity, ask Elias, this is his stuipid work around, cuz he's to lazy to fix it as of right now, what a bum
-      {
-        if( (position_cmds[ii] * 10) - myStepper[ii].current_angle > 0.5)  // will have an error buffer of .5 in either direction
-          {
-            myStepper[ii].current_angle++;
-          }
-        else if((position_cmds[ii] * 10) - myStepper[ii].current_angle < -0.5)
-        {
-          myStepper[ii].current_angle--;
-        }
-      }
-      else if (!myStepper[ii].closed_loop) // ajust angle of closed loop joints
-      {
-        if(position_cmds[ii] - myStepper[ii].current_angle > 0.5)  // will have an error buffer of .5 in either direction
-          {
-            myStepper[ii].current_angle++;
-          }
-        else if(position_cmds[ii] - myStepper[ii].current_angle < -0.5)
-        {
-          myStepper[ii].current_angle--;
-        }
-      }
-    }
+    myStepper[ii].stepCheck();
   }
 }
 
@@ -480,9 +296,9 @@ void zeroing(void)
 {                           
   int motor_speed = -1;  // this number will be mulipilied, dont go crazy
 
-  if(readGPIOFast(lim_switch_a))
+  if(readGPIOFast(LIMIT_SWITCH_PIN))
   {
-    zeroing_loop(motor_speed, 1000, false);
+    zeroing_loop(motor_speed, zeroing_timout_value, false);
   }
 
   motor_speed = 1;
@@ -496,7 +312,7 @@ void zeroing(void)
 
 void zeroing_loop(int motor_speed, int timeout, bool inwards)
 {
-
+/*
   for (int ii = 0; ii < timeout; ++ii )
   {
     position_cmds[0] = position_cmds[0] + (5.0 * motor_speed);  /// These numbers make it so that the arm will rotate somewhat well while still grabbed onto ball
@@ -505,13 +321,13 @@ void zeroing_loop(int motor_speed, int timeout, bool inwards)
 
     motor_task();
 
-    if (readGPIOFast(lim_switch_a) && inwards)
+    if (readGPIOFast(LIMIT_SWITCH_PIN) && inwards)
     {
       Serial.println("Zeoring Complete");
       motor_reset();
       return;
     }
-    else if ((!readGPIOFast(lim_switch_a) && !inwards))
+    else if ((!readGPIOFast(LIMIT_SWITCH_PIN) && !inwards))
     {
       Serial.println("Zeoring Outward push complete");
       motor_reset();
@@ -523,12 +339,14 @@ void zeroing_loop(int motor_speed, int timeout, bool inwards)
 
     delay(5);
   }
-
+  */
+  //motor_reset();
 }
 
 
 void zeroing_loop_single(int motor, int limswitch, int motors_speed, int timeout)
 {
+  /*
   int ii;
 
   --motor;  // this makes it so that motor number is input not motor index
@@ -550,37 +368,37 @@ void zeroing_loop_single(int motor, int limswitch, int motors_speed, int timeout
       return;
     }
   }
-
-  print_lim_switches(motor, true);
-  motor_reset();
+  */
+  print_lim_switches(motor, true);  
+  //motor_reset();
 }
-
+/*
 void motor_reset()
 {
-  for (int jj = 0; jj < NUM_JOINTS; ++jj) 
+  for (int ii = 0; ii < NUM_JOINTS; ++ii) 
   {
-    position_cmds[jj] = 0;
+    myStepper[ii].positionCommand = 0;
 
-    if (myStepper[jj].closed_loop)
+    if (myStepper[ii].closedLoop)
     {
-      myEncoder[jj].write(0);
-      tasks[jj].period = myStepper[jj].newFrequency(myEncoder[jj].read(), position_cmds[jj]);
+      myStepper[ii].resetEncoder();
+      tasks[ii].period = myStepper[ii].newFrequency(myStepper[ii].getEncoder(), myStepper[ii].positionCommand);
     }
 
-    if (!myStepper[jj].closed_loop)
+    if (!myStepper[ii].closedLoop)
     {
-      encoder_positions[jj] = 0;  
-      tasks[jj].period = myStepper[jj].newFrequency(0, 0);
+      myStepper[ii].econderPosition = 0;  
+      tasks[ii].period = myStepper[ii].newFrequency(0, 0);
     }
   }  /// Keep all motors where they are
-}
+}*/
 
 void new_pos ( int motor, int goal_pos ) // input motor NUMBER not motor INDEX
-{
+{/*
   int cur_pos = 0;
 
   --motor;
-  position_cmds[motor] = goal_pos;
+  myStepper[motor].positionCommand = goal_pos;
 
   for (int i = 0; i < zeroing_timout_value; ++i)
   {
@@ -590,8 +408,14 @@ void new_pos ( int motor, int goal_pos ) // input motor NUMBER not motor INDEX
       if (abs(cur_pos - goal_pos) < 2) // will end function off as soon as it's within an error radius of 2
       {
         return;
-      }  
-  }
+      }
+      else if (myStepper[motor].motor_id == 7 && abs(cur_pos - goal_pos) < 11)  //special treatment of joint 7 cuz we need it to move outside of range
+      {
+        return;
+      }
+
+      delay(1);
+  }*/
   Serial.println("AHAHAHA, THIS MOVEMNET FAILED YOU DUMB NUT");
 }
 
@@ -603,7 +427,7 @@ bool readGPIOFast(int pin)
 
 //****************************************    Test Functions       ****************************************
 void motor_test(int tested_motor, int speed)
-{
+{/*
   Serial.print("Testing Motor ");
   Serial.print(tested_motor);
   Serial.println(" ");
@@ -632,8 +456,10 @@ void motor_test(int tested_motor, int speed)
       }
     }
 
-    delay(5);
-  }
+    //print_encoder_values();
+
+    delay(10);
+  }*/
 }
 
 
@@ -657,9 +483,9 @@ void print_lim_switches (int motor_in, int failure)
 void print_encoder_values (void)
 {
   // Encoder readout  
-  for ( int i = 0; i < NUM_JOINTS; ++i)
+  for ( int ii = 0; ii < NUM_JOINTS; ++ii)
   {
-    Serial.print(encoder_positions[i]);
+    Serial.print(myStepper[ii].econderPosition);
     Serial.print(" ");
   }
   Serial.println(" ");
@@ -669,7 +495,7 @@ void print_target_values (void)
 {
   for ( int i = 0; i < NUM_JOINTS; ++i)
   {
-    Serial.print(position_cmds[i]);
+    Serial.print(myStepper[i].positionCommand);
     Serial.print(" ");
   }
   Serial.println(" ");
