@@ -3,14 +3,13 @@
  * 
  * @author Riley Mark
  * @author December 12, 2022
+ * @author Elias Friberg
+ * @author March 2026
  */
+
 #include "step.h"
 
-// #include <Arduino.h>
 
-/**
- * Stepper class constructor 
- */
 Stepper::Stepper(
     int8_t motor_ID_In,
     bool closedLoop_In,
@@ -29,7 +28,6 @@ Stepper::Stepper(
   encoderPinB_ID_In = encoderPinB_ID_In;
   encoderResolution = encoderResolution_In;
 
-  currentAngle = 0;
   positionCommand = 0;
   econderPosition = 0;
 
@@ -50,121 +48,33 @@ Stepper::Stepper(
     encoder.write(0);
 }
 
-/**
- * Advances the state of the step pin 
- * 
- * @return - none
- */
-void Stepper::step() 
+int32_t Stepper::getEncoderPosition() const 
 {
-  if (!highLow) 
-  {
-    if (direction == HIGH) 
-    {
-      digitalWrite(directionPin_ID, HIGH);
-      digitalWrite(stepPin_ID, HIGH);
-    }
-    else 
-    {
-      digitalWrite(directionPin_ID, LOW);
-      digitalWrite(stepPin_ID, HIGH);
-    }
+  return econderPosition;
+}
 
-    highLow = HIGH;
-  }
-  else 
-  {
-    digitalWrite(stepPin_ID, LOW);
-    highLow = LOW;
-  }
+int32_t Stepper::getPositionCommand() const
+{
+  return positionCommand;
+}
+
+void Stepper::setPositionCommand(int32_t input)
+{
+  positionCommand = input;
 }
 
 
-/**
- * The PID controller for the ARM motors.
- * 
- * @param desired_angle - position setpoint in encoder steps
- * @param current_pos - current position of the motor in encoder steps
- * 
- * @return int - current instantaneous velocity of motor
- * 
- * TODO: Tune the PID controllers
- */
-double Stepper::pid_controller(double desired_angle, double current_pos) 
-{
-  double now_time = micros();
-  double delta_time = now_time - previous_time;
-  previous_time = now_time;
-
-  error = desired_angle - current_pos;
-  integral += error;
-  derivative = (error - previous_error) / delta_time;
-
-  // clamp the integral
-  if (integral > max_integral) 
-  {  
-    integral = max_integral;
-  } 
-  else if (integral < -max_integral) 
-  {
-    integral = -max_integral;
-  }
-
-  previous_error = error;
-
-  return velocity = error * proportional_gain + integral * integral_gain + derivative * derivative_gain;
-}
-
-
-/**
- * Converts degrees to steps
- * 
- * @param deg - int of target position in degrees
- * TODO: For future missions this should get converted to a double
- * 
- * @return int - angle in steps
- * 
- * TODO: update this with the updated gear ratios per joint
- * TODO: dont hard code in the gear ratios....
- */
-int Stepper::deg_to_step(int deg) 
-{
-  if (motor_ID == 7 || motor_ID == 8 ) 
-  {
-    int temp_val = ( 1 / 360.0 );
-    return temp_val * deg;
-  } 
-  else if (motor_ID == 6 ) 
-  {
-    int temp_val = ((encoderResolution * 4.0 ) / 360.0);
-    return temp_val * deg;
-  }
-  else
-  {
-    int temp_val = ((encoderResolution * 4.0 * 7.0 ) / 360.0);
-    return temp_val * deg;
-  } 
-}
-
-
-/**
- * Function to update the frequency and direction of the motor movement.
- * 
- * @param position - current encoder position
- * @param desired_position - desired position from Jetson cmd
- * 
- * @return int - frequency of motor movement
- * 
- * TODO: set the motor polarity once the new motors are wired up
- */
-int Stepper::newFrequency(double position, double desired_position) 
+void Stepper::motorTask() // Sets a new frequency
 {
   int velocity;
+  velocity = pid_controller(positionCommand, econderPosition);
+  
+  if(closedLoop)
+  {
+    econderPosition = encoder.read();
+  }
 
-  velocity = pid_controller(desired_position, position);
-
-
-  if (true) // All Joints  (put motor_ID == 1 if you need to flip motor 1 polarity)
+  if (true) // All Joints  (put motor_ID == 1 through motor_ID == 6 if you need to flip motor 7 polarity)
   {  
     if (velocity > 0) 
     {
@@ -202,35 +112,48 @@ int Stepper::newFrequency(double position, double desired_position)
     motorFrequency = 100;
   } 
 
-  return motorFrequency;
+  tasks.period = motorFrequency; // Need to test this, make sure it's right
 }
 
-int32_t Stepper::getEncoder()
+/**
+ * The PID controller for the ARM motors.
+ * 
+ * @param desired_angle - position setpoint in encoder steps
+ * @param current_pos - current position of the motor in encoder steps
+ * 
+ * @return int - current instantaneous velocity of motor
+ * 
+ * TODO: Tune the PID controllers
+ */
+double Stepper::pid_controller(double desired_angle, double current_pos) 
 {
-  return encoder.read();
-}
+  double now_time = micros();
+  double delta_time = now_time - previous_time;
+  double error;
+  double derivative;
 
-void Stepper::read_encoders()
-{ 
-  if(closedLoop) {
-    econderPosition = getEncoder();
+  previous_time = now_time;
+
+  error = desired_angle - current_pos;
+  integral += error;
+  derivative = (error - previous_error) / delta_time;
+
+  // clamp the integral
+  if (integral > max_integral) 
+  {  
+    integral = max_integral;
+  } 
+  else if (integral < -max_integral) 
+  {
+    integral = -max_integral;
   }
-  else{
-    econderPosition = currentAngle;  
-  }
+
+  previous_error = error;
+
+  return velocity = error * proportional_gain + integral * integral_gain + derivative * derivative_gain;
 }
 
-void Stepper::motor_task()
-{
-  econderPosition = get_position();
-  if (motor_ID == 6) 
-    tasks.period = newFrequency(get_position(), positionCommand * 10);
-  else
-    tasks.period = newFrequency(get_position(), positionCommand);
-
-
-}
-
+// ISR Function
 void Stepper::stepCheck()
 {
   if (tasks.period == 0) 
@@ -245,36 +168,75 @@ void Stepper::stepCheck()
   {
     step();       //call the step function
     tasks.elapsedTime = 0;  //reset the elapsed time
+    
+    updateClosedLoopMotors();
+  }
+}
 
-    if (motor_ID == 7)  // speicial *10 for special joint 7 funcitnallity, ask Elias, this is his stuipid work around, cuz he's to lazy to fix it as of right now, what a bum
+/**
+ * Advances the state of the step pin 
+ * 
+ * @return - none
+ */
+void Stepper::step() 
+{
+  if (!highLow) 
+  {
+    if (direction == HIGH) 
     {
-      if ((positionCommand * 10) - currentAngle > 0.5)  // will have an error buffer of .5 in either direction
-      {
-        currentAngle++;
-      } else if ((positionCommand * 10) - currentAngle < -0.5) {
-        currentAngle--;
-      }
-    } else if (!closedLoop)  // ajust angle of closed loop joints
+      digitalWrite(directionPin_ID, HIGH);
+    }
+    else 
     {
-      if (positionCommand - currentAngle > 0.5)  // will have an error buffer of .5 in either direction
-      {
-        currentAngle++;
-      } else if (positionCommand - currentAngle < -0.5) {
-        currentAngle--;
-      }
+      digitalWrite(directionPin_ID, LOW);
+    }
+
+    digitalWrite(stepPin_ID, HIGH);
+    highLow = HIGH;
+  }
+  else 
+  {
+    digitalWrite(stepPin_ID, LOW);
+    highLow = LOW;
+  }
+}
+
+void Stepper::updateClosedLoopMotors()
+{
+  if(!closedLoop)  // Open Loop
+  {
+    if (positionCommand - econderPosition > 0.5)  // will have an error buffer of .5 in either direction
+    {
+      econderPosition++;
+    } else if (positionCommand - econderPosition < -0.5) 
+    {
+      econderPosition--;
     }
   }
 }
 
-
-int Stepper::get_position()
+void Stepper::motorReset()
 {
-  if (motor_ID < 5)   // closed loop
-    return getEncoder();
-  else if (motor_ID == 6)           // speicial command for joint 7, that allows it to get to the desired position, which is outside the current limit of the communcated values 
-    return currentAngle; 
-  else                                // open loop
-    return currentAngle;
+  positionCommand = 0;
+  econderPosition = 0;
+  resetEncoder();
+}
+
+void Stepper::resetEncoder()
+{
+  encoder.write(0);
+}
+
+
+int Stepper::rad_to_step(int deg)
+{
+    return deg * 100;
+}
+
+
+int Stepper::step_to_rad(int step)
+{
+  return step / 100;
 }
 
 

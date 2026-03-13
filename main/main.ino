@@ -40,24 +40,13 @@ Stepper myStepper[] =
 
 //****************************************    High Level Code       ****************************************
 
-/**
- * Calls setup and loop 
- */
 int main(void) 
 {
   setup();
   //zeroing();
-
   loop();
 }
 
-/**
- * L O O P
- * 
- * Receives serial commands from Jetson on serial port 1, updates the motor 
- * position setpoints, reads encoder positions, and sends status serial message
- * back to Jetson.
- */
 void loop(void) 
 {
   while (1)
@@ -65,10 +54,8 @@ void loop(void)
     // Serial Receive
     receive_command();
 
-    // Read Encoders
-    read_encoders();
-
-    motor_task();
+    // Check Each Motor
+    //motor_task();
 
     // Serial Send
     send_status();
@@ -78,20 +65,11 @@ void loop(void)
     Serial.println(" ");
 
     delay(10);
-  
   }
 }
 
 
 //****************************************    Low Level Code       ****************************************
-
-/**
- * S E T U P
- * 
- * Initializes the LED, initializes the task scheduler, initializes the timer 
- * interrupt with a 10 microsecond period. Starts the Jetson serial comm link
- * with a 8N1 communication scheme and a baud rate of 115200.
- */
 void setup(void) {
   
   Serial.begin(115200);
@@ -112,22 +90,11 @@ void setup(void) {
   interrupts();
 }
 
-/**
- * Reads the current position of all encoders into myStepper
- */
-void read_encoders() // TODO: Merge these 2 tings in a function
-{ 
-  for(int ii = 0; ii < NUM_JOINTS; ++ii) 
-  { 
-    myStepper[ii].read_encoders();
-  }
-}
-
 void motor_task()
 {
   for (int ii = 0; ii < NUM_JOINTS; ++ii) 
   {
-    myStepper[ii].motor_task();
+    myStepper[ii].motorTask();
   }
 }
 
@@ -158,7 +125,7 @@ int receive_command()
       {
         for (int j = 0; j < NUM_JOINTS; ++j) 
         {
-          myStepper[j].positionCommand = tnsy_cmd.setpoint_position[j];
+          myStepper[j].setPositionCommand(tnsy_cmd.setpoint_position[j]);
         }
         return 1;
       } 
@@ -178,12 +145,6 @@ int receive_command()
 }
 
 
-/**
- * @brief - parses incoming serial messages 
- * 
- * @return int - -3 unknown message type, -2 did not pass header, -1 did not 
- *               pass CRC, OTHER: message type.
- */
 int parse_message(const uint8_t* buf, int size) 
 {
 
@@ -239,14 +200,6 @@ int parse_message(const uint8_t* buf, int size)
   }
 }
 
-
-/**
- * @brief - constructs packet with latest encoder data to send to jetson. Sends 
- *          packet once the construction is complete. Message structure is 
- *          defined in teensy_comm.h.
- * 
- * @return int - 0 success, 1 fail
- */
 int send_status (void) 
 {
   uint8_t buffer[1024] = {0};
@@ -259,9 +212,9 @@ int send_status (void)
   for (int ii = 0; ii < NUM_JOINTS; ii++) 
   {
     if (ii == 6)
-      tnsy_sts.encoder[ii] = (myStepper[ii].econderPosition / 10.0);
+      tnsy_sts.encoder[ii] = (myStepper[ii].getEncoderPosition() / 10.0);
     else
-      tnsy_sts.encoder[ii] = myStepper[ii].econderPosition;
+      tnsy_sts.encoder[ii] = myStepper[ii].getEncoderPosition();
   }
 
   memcpy(&buffer[0], &tnsy_sts, sizeof(tnsy_sts) - 2);
@@ -274,10 +227,6 @@ int send_status (void)
   return 0;
 }
 
-/** 
- * Interrupt Service Routine for stepping the motors at the correct rate and to
- * the correct position.
- */
 void motorISR(void) 
 {
   for (int ii = 0; ii < NUM_JOINTS; ++ii) 
@@ -287,111 +236,22 @@ void motorISR(void)
 }
 
 //****************************************    Zeroing       ****************************************
-/**
-*
-*
- */
 
 void zeroing(void)
 {                           
-  int motor_speed = -1;  // this number will be mulipilied, dont go crazy
 
-  if(readGPIOFast(LIMIT_SWITCH_PIN))
-  {
-    zeroing_loop(motor_speed, zeroing_timout_value, false);
-  }
 
-  motor_speed = 1;
-
-  zeroing_loop(motor_speed, zeroing_timout_value, true);
-
-  //zeroing_loop_single(1, lim_switch_a, motor_speed, zeroing_timout_value); // Input motor number, not motor index
-  //zeroing_loop_single(3, lim_switch_b, motor_speed, zeroing_timout_value);
-  //zeroing_loop_single(5, lim_switch_c, motor_speed, zeroing_timout_value);
-}
-
-void zeroing_loop(int motor_speed, int timeout, bool inwards)
-{
-/*
-  for (int ii = 0; ii < timeout; ++ii )
-  {
-    position_cmds[0] = position_cmds[0] + (5.0 * motor_speed);  /// These numbers make it so that the arm will rotate somewhat well while still grabbed onto ball
-    position_cmds[2] = position_cmds[2] + (2.8 * motor_speed); 
-    position_cmds[4] = position_cmds[4] - (3.5 * motor_speed);   
-
-    motor_task();
-
-    if (readGPIOFast(LIMIT_SWITCH_PIN) && inwards)
-    {
-      Serial.println("Zeoring Complete");
-      motor_reset();
-      return;
-    }
-    else if ((!readGPIOFast(LIMIT_SWITCH_PIN) && !inwards))
-    {
-      Serial.println("Zeoring Outward push complete");
-      motor_reset();
-      return;
-    }
-
-    Serial.print("Zeroing: ");
-    print_encoder_values();
-
-    delay(5);
-  }
-  */
-  //motor_reset();
+  motor_reset();
 }
 
 
-void zeroing_loop_single(int motor, int limswitch, int motors_speed, int timeout)
-{
-  /*
-  int ii;
-
-  --motor;  // this makes it so that motor number is input not motor index
-
-  for (ii = 0; ii < zeroing_timout_value; ++ii)
-  {
-    //tasks[motor].period = myStepper[motor].newFrequency(myEncoder[motor].read(), myEncoder[motor].read() + motors_speed);
-    position_cmds[motor] = position_cmds[motor] + motors_speed;
-    motor_task();
-
-    print_lim_switches(motor, false);
-    print_encoder_values();
-
-    delay(5);
-
-    if (readGPIOFast(limswitch))
-    {
-      motor_reset();
-      return;
-    }
-  }
-  */
-  print_lim_switches(motor, true);  
-  //motor_reset();
-}
-/*
 void motor_reset()
 {
   for (int ii = 0; ii < NUM_JOINTS; ++ii) 
   {
-    myStepper[ii].positionCommand = 0;
-
-    if (myStepper[ii].closedLoop)
-    {
-      myStepper[ii].resetEncoder();
-      tasks[ii].period = myStepper[ii].newFrequency(myStepper[ii].getEncoder(), myStepper[ii].positionCommand);
-    }
-
-    if (!myStepper[ii].closedLoop)
-    {
-      myStepper[ii].econderPosition = 0;  
-      tasks[ii].period = myStepper[ii].newFrequency(0, 0);
-    }
-  }  /// Keep all motors where they are
-}*/
+    myStepper[ii].motorReset();
+  }
+}
 
 void new_pos ( int motor, int goal_pos ) // input motor NUMBER not motor INDEX
 {/*
@@ -485,7 +345,7 @@ void print_encoder_values (void)
   // Encoder readout  
   for ( int ii = 0; ii < NUM_JOINTS; ++ii)
   {
-    Serial.print(myStepper[ii].econderPosition);
+    Serial.print(myStepper[ii].getEncoderPosition());
     Serial.print(" ");
   }
   Serial.println(" ");
@@ -495,7 +355,7 @@ void print_target_values (void)
 {
   for ( int i = 0; i < NUM_JOINTS; ++i)
   {
-    Serial.print(myStepper[i].positionCommand);
+    Serial.print(myStepper[i].getPositionCommand());
     Serial.print(" ");
   }
   Serial.println(" ");
