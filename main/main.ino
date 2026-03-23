@@ -4,9 +4,39 @@
 #include <TimerOne.h>
 #include <imxrt.h> // Make sure Teensy core libraries are included
 
+//  ***************************************** Zeroing Globals *****************************************
+
 #define LIMIT_SWITCH_PIN 39
 #define zeroing_timout_value 8000
+const bool zeroingEnabled = true;
 
+//  ***************************************** Task Schedualing Globals *****************************************
+
+const bool Jetson_Comm_Enable = true;
+const bool Positions_Readout_Enable = false;
+const bool Motor_Task_Enable = true;
+
+#define NUM_TASKS 4
+#define ISR_BASE_uS 10 // µs
+
+#define RX_PERIOD_uS     10000 // µs
+#define TX_PERIOD_uS     10000 // µs
+#define PRINT_PERIOD_uS  500000 // µs
+#define MOTOR_PERIOD_uS  1  // run every time
+
+typedef struct task
+{
+  uint32_t period;
+  uint32_t elapsedTime;
+  bool runFlag;
+  bool enable;
+  void (*TickFct)();
+} task;
+
+task tasks[NUM_TASKS];
+
+
+// ***************************************** Jetson/Teensy Serial Globals *****************************************
 static teensy_status_t tnsy_sts = {0};
 static teensy_command_t tnsy_cmd = {0};
 static teensy_zero_t tnsy_zero = {0};
@@ -14,6 +44,7 @@ static teensy_header_t tnsy_hdr = {0};
 
 int32_t position_cmds[NUM_JOINTS];
 
+// ***************************************** Stepper Class Initialization *****************************************
 /*  Stepper Contructor:
 Stepper::Stepper(
     int8_t motor_ID_In,
@@ -28,11 +59,11 @@ Stepper::Stepper(
 Stepper myStepper[] = 
 {//      motor_ID   ClosedLoop    stepPin   dirPin    encoderPin_A    encoderPin_B  encoderRes.
   Stepper(1,        1,            3,        2,        14,             15,           1000  ),
-  Stepper(2,        1,            5,        4,        16,             17,           300   ),
+  Stepper(2,        1,            5,        4,        16,             17,           1000   ),
   Stepper(3,        1,            7,        6,        18,             19,           1000  ), 
-  Stepper(4,        1,            9,        8,        21,             20,           300   ),
+  Stepper(4,        1,            9,        8,        21,             20,           1000   ),
   Stepper(5,        1,            11,       10,       23,             22,           1000  ),
-  Stepper(6,        1,            13,       12,       25,             24,           300   ),
+  Stepper(6,        1,            13,       12,       25,             24,           1000   ),
   Stepper(7,        1,            28,       29,       27,             26,           1000  ),
   Stepper(8,        1,            28,       29,       27,             26,           1000  )
 };
@@ -46,7 +77,7 @@ int main(void)
   //zeroing();
   loop();
 }
-
+/*
 void loop(void) 
 {
   while (1)
@@ -55,7 +86,7 @@ void loop(void)
     receive_command();
 
     // Check Each Motor
-    //motor_task();
+    motor_task();
 
     // Serial Send
     send_status();
@@ -65,6 +96,22 @@ void loop(void)
     Serial.println(" ");
 
     delay(10);
+  }
+}
+*/
+
+void loop(void)
+{
+  while (1)
+  {
+    for (int i = 0; i < NUM_TASKS; i++)
+    {
+      if (tasks[i].runFlag)
+      {
+        tasks[i].runFlag = false;
+        tasks[i].TickFct();
+      }
+    }
   }
 }
 
@@ -79,16 +126,46 @@ void setup(void) {
   pinMode(13, OUTPUT);
 
   Timer1.initialize(10);             // interrupt every 10 us
-  Timer1.attachInterrupt(motorISR);  // motorISR is the ISR
+  Timer1.attachInterrupt(ISRFunction);  // motorISR is the ISR
   Timer1.start();
   
   Serial1.begin(115200, SERIAL_8N1);
   //Serial.begin(115200);
 
+  initTasks();
+  
   Serial.println("Setup Complete");
 
   interrupts();
 }
+
+void initTasks()
+{
+  tasks[0].period = RX_PERIOD_uS/ISR_BASE_uS;
+  tasks[0].elapsedTime = RX_PERIOD_uS/ISR_BASE_uS;
+  tasks[0].runFlag = false;
+  tasks[0].enable = Jetson_Comm_Enable;
+  tasks[0].TickFct = &receive_task;
+
+  tasks[1].period = TX_PERIOD_uS/ISR_BASE_uS;
+  tasks[1].elapsedTime = TX_PERIOD_uS/ISR_BASE_uS;
+  tasks[1].runFlag = false;
+  tasks[1].enable = Jetson_Comm_Enable;
+  tasks[1].TickFct = &send_task;
+
+  tasks[2].period = PRINT_PERIOD_uS/ISR_BASE_uS;
+  tasks[2].elapsedTime = PRINT_PERIOD_uS/ISR_BASE_uS;
+  tasks[2].runFlag = false;
+  tasks[2].enable = Positions_Readout_Enable;
+  tasks[2].TickFct = &printBoth;
+
+  tasks[3].period = MOTOR_PERIOD_uS/ISR_BASE_uS;
+  tasks[3].elapsedTime = MOTOR_PERIOD_uS/ISR_BASE_uS;
+  tasks[3].runFlag = false;
+  tasks[3].enable = Motor_Task_Enable;
+  tasks[3].TickFct = &motor_task;
+}
+
 
 void motor_task()
 {
@@ -143,7 +220,6 @@ int receive_command()
   }
   return 0;
 }
-
 
 int parse_message(const uint8_t* buf, int size) 
 {
@@ -211,10 +287,7 @@ int send_status (void)
 
   for (int ii = 0; ii < NUM_JOINTS; ii++) 
   {
-    if (ii == 6)
-      tnsy_sts.encoder[ii] = (myStepper[ii].getEncoderPosition() / 10.0);
-    else
-      tnsy_sts.encoder[ii] = myStepper[ii].getEncoderPosition();
+    tnsy_sts.encoder[ii] = myStepper[ii].getEncoderPosition();
   }
 
   memcpy(&buffer[0], &tnsy_sts, sizeof(tnsy_sts) - 2);
@@ -227,12 +300,75 @@ int send_status (void)
   return 0;
 }
 
+void receive_task()
+{
+  int ret = receive_command();
+
+  switch(ret)
+  {
+    case -1:
+      Serial.println("Receive Error: Buffer overflow");
+      break;
+
+    case -2:
+      Serial.println("Receive Error: Parse failed");
+      break;
+
+    default:
+      break;
+  }
+}
+
+void send_task()
+{
+  int ret = send_status();
+
+  if (ret < 0)
+  {
+    Serial.println("Send Error");
+  }
+}
+
+void ISRFunction() 
+{
+  motorISR();
+
+  for (int i = 0; i < NUM_TASKS; i++) 
+  {
+    if (tasks[i].enable) 
+    {
+      tasks[i].elapsedTime++;
+
+      if (tasks[i].elapsedTime >= tasks[i].period) 
+      {
+        tasks[i].elapsedTime = 0;
+        tasks[i].runFlag = true;
+      }
+    }
+  }
+}
+
 void motorISR(void) 
 {
   for (int ii = 0; ii < NUM_JOINTS; ++ii) 
   {
     myStepper[ii].stepCheck();
   }
+}
+
+void CommISR()
+{
+  // Serial Receive
+  receive_command();
+  // Serial Send
+  send_status();
+}
+
+void printBoth()
+{
+  print_encoder_values();
+  print_target_values();
+  Serial.println(" ");
 }
 
 //****************************************    Zeroing       ****************************************
@@ -360,16 +496,3 @@ void print_target_values (void)
   }
   Serial.println(" ");
 }
-
-/**
-
-If the permission port permission error occurs, use the following commands on Jetson
-
-sudo usermod -a -G tty <username>
-sudo usermod -a -G dialout <username>
-sudo usermod -a -G sudo <username>
-
-sudo chmod g+rw /dev/ttyTHS1
-
-
-*/

@@ -12,6 +12,8 @@
 #include "Arduino.h"
 #include "Encoder.h"
 
+#define NUM_JOINTS 8
+#define GEAR_RATIO 5.076923077
 
 class Stepper {
 public:
@@ -94,8 +96,8 @@ private:
 
    //int newFrequency(double position, double desired_position);
 
-   int rad_to_step(int deg);
-   int step_to_rad(int step);
+   int32_t rad_to_step(int32_t deg) const;
+   int32_t step_to_rad(int32_t step) const;
 
 };
 

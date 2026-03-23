@@ -50,17 +50,17 @@ Stepper::Stepper(
 
 int32_t Stepper::getEncoderPosition() const 
 {
-  return econderPosition;
+  return step_to_rad(econderPosition);
 }
 
 int32_t Stepper::getPositionCommand() const
 {
-  return positionCommand;
+  return step_to_rad(positionCommand);
 }
 
 void Stepper::setPositionCommand(int32_t input)
 {
-  positionCommand = input;
+  positionCommand = rad_to_step(input);
 }
 
 
@@ -227,16 +227,38 @@ void Stepper::resetEncoder()
   encoder.write(0);
 }
 
-
-int Stepper::rad_to_step(int deg)
+/**
+ * @brief Converts an angle in radians to the equivalent number of motor steps.
+ *
+ * This function accounts for:
+ * - The gear ratio between the motor and the output shaft (GEAR_RATIO)
+ * - The encoder resolution in pulses per revolution (encoderResolution), which is then coverted FROM step/rev TO step/rad ( / 2.0 * PI )
+ * - Quadrature decoding, which multiplies counts by 4 (rising/falling edges of A and B channels)
+ * - Final get's dived by 100 becuase communication with Jetson can't be a decimal, so we convert to hundreths of radians
+ *
+ * @param rad Angle in radians to convert.
+ * @return Equivalent step count for the stepper motor.
+ */
+int32_t Stepper::rad_to_step(int32_t rad) const
 {
-    return deg * 100;
+  return (int32_t)((rad * GEAR_RATIO * encoderResolution * 4) / (100.0 * 2.0 * PI));
 }
 
-
-int Stepper::step_to_rad(int step)
+/**
+ * @brief Converts a motor step count back to an angle in radians.
+ *
+ * This is the inverse of rad_to_step(), taking into account:
+ * - The gear ratio (GEAR_RATIO)
+ * - Encoder resolution (encoderResolution),  which is then coverted FROM step/rev TO step/rad ( / 2.0 * PI )
+ * - Quadrature decoding (4× pulses)
+ * - Final get's multiplied by 100 becuase communication with Jetson can't be a decimal, so we convert to hundreths of radians
+ *
+ * @param step Step count from the stepper motor.
+ * @return Angle in radians corresponding to the given step count.
+ */
+int32_t Stepper::step_to_rad(int32_t step) const
 {
-  return step / 100;
+  return (int32_t)((step * 100.0 * 2.0 * PI) / (GEAR_RATIO * encoderResolution * 4));
 }
 
 
