@@ -11,28 +11,27 @@
 
 
 Stepper::Stepper(
-    int8_t motor_ID_In,
-    bool closedLoop_In,
-    int8_t stepPin_ID_In,
-    int8_t directionPin_ID_In,
-    int8_t encoderPinA_ID_In,
-    int8_t encoderPinB_ID_In,
-    int encoderResolution_In
-  ): encoder(encoderPinA_ID_In, encoderPinB_ID_In)
-{
+  int8_t motor_ID_In,
+  bool closedLoop_In,
+  int8_t stepPin_ID_In,
+  int8_t directionPin_ID_In,
+  int8_t encoderPinA_ID_In,
+  int8_t encoderPinB_ID_In,
+  int encoderResolution_In)
+  : encoder(encoderPinA_ID_In, encoderPinB_ID_In) {
   motor_ID = motor_ID_In;
   closedLoop = closedLoop_In;
   stepPin_ID = stepPin_ID_In;
   directionPin_ID = directionPin_ID_In;
-  encoderPinA_ID = encoderPinA_ID_In;     //TODO: Dont think you need dis if you make encoder later
+  encoderPinA_ID = encoderPinA_ID_In;  //TODO: Dont think you need dis if you make encoder later
   encoderPinB_ID_In = encoderPinB_ID_In;
   encoderResolution = encoderResolution_In;
 
   positionCommand = 0;
   econderPosition = 0;
 
-  proportional_gain = 0.3;
-  integral_gain = 0.5;
+  proportional_gain = 0.5;  // Max: 0.85 TODO: CHECK MIN
+  integral_gain = 0.05;
   derivative_gain = 0.01;
   max_integral = 1;
 
@@ -42,77 +41,61 @@ Stepper::Stepper(
   tasks.state = false;
   tasks.elapsedTime = 0;
   tasks.period = 1000000;
-    
+
 
   if (closedLoop)
     encoder.write(0);
 }
 
-int32_t Stepper::getEncoderPosition() const 
-{
+int32_t Stepper::getEncoderPosition() const {
   return step_to_rad(econderPosition);
 }
 
-int32_t Stepper::getPositionCommand() const
-{
+int32_t Stepper::getPositionCommand() const {
   return step_to_rad(positionCommand);
 }
 
-void Stepper::setPositionCommand(int32_t input)
-{
+void Stepper::setPositionCommand(int32_t input) {
   positionCommand = rad_to_step(input);
 }
 
 
-void Stepper::motorTask() // Sets a new frequency
+void Stepper::motorTask()  // Sets a new frequency
 {
   int velocity;
   velocity = pid_controller(positionCommand, econderPosition);
-  
-  if(closedLoop)
-  {
+
+  if (closedLoop) {
     econderPosition = encoder.read();
   }
 
-  if (true) // All Joints  (put motor_ID == 1 through motor_ID == 6 if you need to flip motor 7 polarity)
-  {  
-    if (velocity > 0) 
-    {
+  if (true)  // All Joints  (put motor_ID == 1 through motor_ID == 6 if you need to flip motor 7 polarity)
+  {
+    if (velocity > 0) {
       direction = HIGH;
-    } 
-    else 
-    {
+    } else {
       direction = LOW;
     }
-  } 
-  else 
-  {    
-    if (velocity > 0) 
-    {
+  } else {
+    if (velocity > 0) {
       direction = LOW;
-    } 
-    else 
-    {
+    } else {
       direction = HIGH;
     }
   }
 
   // clamp the motor frequency
-  if (fabs(velocity) < 0.001) 
-  {
+  if (fabs(velocity) < 0.001) {
     motorFrequency = 1000000;
-  } 
-  else 
-  {
+  } else {
     motorFrequency = (1000 / abs(velocity));
   }
 
-  if (motorFrequency <= 100) 
-  {
-    motorFrequency = 100;
-  } 
+  if (motorFrequency <= 150) {
+    motorFrequency = 150;
+  }
 
-  tasks.period = motorFrequency; // Need to test this, make sure it's right
+  tasks.period = motorFrequency;  // Need to test this, make sure it's right
 }
 
 /**
@@ -125,8 +108,7 @@ void Stepper::motorTask() // Sets a new frequency
  * 
  * TODO: Tune the PID controllers
  */
-double Stepper::pid_controller(double desired_angle, double current_pos) 
-{
+double Stepper::pid_controller(double desired_angle, double current_pos) {
   double now_time = micros();
   double delta_time = now_time - previous_time;
   double error;
@@ -139,12 +121,9 @@ double Stepper::pid_controller(double desired_angle, double current_pos)
   derivative = (error - previous_error) / delta_time;
 
   // clamp the integral
-  if (integral > max_integral) 
-  {  
+  if (integral > max_integral) {
     integral = max_integral;
-  } 
-  else if (integral < -max_integral) 
-  {
+  } else if (integral < -max_integral) {
     integral = -max_integral;
   }
 
@@ -154,21 +133,18 @@ double Stepper::pid_controller(double desired_angle, double current_pos)
 }
 
 // ISR Function
-void Stepper::stepCheck()
-{
-  if (tasks.period == 0) 
-  {
+void Stepper::stepCheck() {
+  if (tasks.period == 0) {
     return;
   }
 
   //increase the elapsed time since the last time the function was called
   tasks.elapsedTime += 10;
 
-  if (tasks.elapsedTime >= tasks.period) 
-  {
-    step();       //call the step function
+  if (tasks.elapsedTime >= tasks.period) {
+    step();                 //call the step function
     tasks.elapsedTime = 0;  //reset the elapsed time
-    
+
     updateClosedLoopMotors();
   }
 }
@@ -178,52 +154,41 @@ void Stepper::stepCheck()
  * 
  * @return - none
  */
-void Stepper::step() 
-{
-  if (!highLow) 
-  {
-    if (direction == HIGH) 
-    {
+void Stepper::step() {
+  if (!highLow) {
+    if (direction == HIGH) {
       digitalWrite(directionPin_ID, HIGH);
-    }
-    else 
-    {
+    } else {
       digitalWrite(directionPin_ID, LOW);
     }
 
     digitalWrite(stepPin_ID, HIGH);
     highLow = HIGH;
-  }
-  else 
-  {
+  } else {
     digitalWrite(stepPin_ID, LOW);
     highLow = LOW;
   }
 }
 
-void Stepper::updateClosedLoopMotors()
-{
-  if(!closedLoop)  // Open Loop
+void Stepper::updateClosedLoopMotors() {
+  if (!closedLoop)  // Open Loop
   {
     if (positionCommand - econderPosition > 0.5)  // will have an error buffer of .5 in either direction
     {
       econderPosition++;
-    } else if (positionCommand - econderPosition < -0.5) 
-    {
+    } else if (positionCommand - econderPosition < -0.5) {
       econderPosition--;
     }
   }
 }
 
-void Stepper::motorReset()
-{
+void Stepper::motorReset() {
   positionCommand = 0;
   econderPosition = 0;
   resetEncoder();
 }
 
-void Stepper::resetEncoder()
-{
+void Stepper::resetEncoder() {
   encoder.write(0);
 }
 
@@ -239,8 +204,7 @@ void Stepper::resetEncoder()
  * @param rad Angle in radians to convert.
  * @return Equivalent step count for the stepper motor.
  */
-int32_t Stepper::rad_to_step(int32_t rad) const
-{
+int32_t Stepper::rad_to_step(int32_t rad) const {
   return (int32_t)((rad * GEAR_RATIO * encoderResolution * 4) / (100.0 * 2.0 * PI));
 }
 
@@ -256,9 +220,6 @@ int32_t Stepper::rad_to_step(int32_t rad) const
  * @param step Step count from the stepper motor.
  * @return Angle in radians corresponding to the given step count.
  */
-int32_t Stepper::step_to_rad(int32_t step) const
-{
+int32_t Stepper::step_to_rad(int32_t step) const {
   return (int32_t)((step * 100.0 * 2.0 * PI) / (GEAR_RATIO * encoderResolution * 4));
 }
-
-

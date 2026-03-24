@@ -13,14 +13,14 @@ const bool zeroingEnabled = true;
 //  ***************************************** Task Schedualing Globals *****************************************
 
 const bool Jetson_Comm_Enable = true;
-const bool Positions_Readout_Enable = false;
+const bool Positions_Readout_Enable = true;
 const bool Motor_Task_Enable = true;
 
 #define NUM_TASKS 4
 #define ISR_BASE_uS 10 // µs
 
-#define RX_PERIOD_uS     10000 // µs
-#define TX_PERIOD_uS     10000 // µs
+#define RX_PERIOD_uS     12500 // µs
+#define TX_PERIOD_uS     12500 // µs
 #define PRINT_PERIOD_uS  500000 // µs
 #define MOTOR_PERIOD_uS  1  // run every time
 
@@ -311,7 +311,7 @@ void receive_task()
       break;
 
     case -2:
-      Serial.println("Receive Error: Parse failed");
+      //Serial.println("Receive Error: Parse failed");
       break;
 
     default:
