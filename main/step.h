@@ -4,16 +4,141 @@
  * @author Riley Mark
  * @author December 12, 2022
  */
+
+/**
+ * ChatGPT Cheet Sheet:
+ *
+ * ===============================================================
+ *                       PID TUNING CHEAT SHEET
+ * ===============================================================
+ *
+ * SYSTEM:
+ * Position → PID → velocity → step frequency
+ *
+ * ---------------------------------------------------------------
+ * PROPORTIONAL (P)
+ * ---------------------------------------------------------------
+ * Too Low:
+ *   - Slow response
+ *   - May not reach target
+ *
+ * Too High:
+ *   - Large oscillations (big swings past target)
+ *   - Overshoot, instability
+ *
+ * Fix:
+ *   - Increase until oscillation, then reduce ~20–30%
+ *
+ * ---------------------------------------------------------------
+ * INTEGRAL (I)
+ * ---------------------------------------------------------------
+ * Too Low:
+ *   - Stops near target but not exactly (steady-state error)
+ *
+ * Too High:
+ *   - Wobbling near target (small back-and-forth motion)
+ *   - Slow oscillations
+ *
+ * Extreme (Windup):
+ *   - Large overshoot
+ *   - Keeps pushing after crossing target
+ *
+ * Fix:
+ *   - Add only if needed
+ *   - Increase slowly
+ *
+ * ---------------------------------------------------------------
+ * DERIVATIVE (D)
+ * ---------------------------------------------------------------
+ * Too Low:
+ *   - Overshoot
+ *   - Poor stopping behavior
+ *
+ * Too High:
+ *   - Noisy / jittery motion
+ *   - Amplifies encoder noise
+ *
+ * Fix:
+ *   - Increase to reduce overshoot
+ *   - Keep minimal for smooth motion
+ *
+ * ---------------------------------------------------------------
+ * MAX_INTEGRAL (Anti-Windup Clamp)
+ * ---------------------------------------------------------------
+ * Too Low:
+ *   - Acts like I is too small
+ *   - Cannot remove steady-state error
+ *
+ * Too High:
+ *   - Overshoot increases
+ *   - Windup effects
+ *
+ * Fix:
+ *   - Set just high enough to remove error
+ *
+ * ---------------------------------------------------------------
+ * OSCILLATION vs WOBBLE
+ * ---------------------------------------------------------------
+ * Oscillation:
+ *   - Large, fast swings around target
+ *   - Cause: P too high
+ *
+ * Wobble Near Target:
+ *   - Small, slow twitching at target
+ *   - Cause: I too high
+ *
+ * ---------------------------------------------------------------
+ * COMMON SYMPTOMS → FIXES
+ * ---------------------------------------------------------------
+ * Slow response            → ↑ P
+ * Oscillation              → ↓ P or ↑ D
+ * Overshoot                → ↑ D or ↓ P
+ * Stops short              → ↑ I or ↑ MAX_INTEGRAL
+ * Wobbling near target     → ↓ I
+ * Big overshoot after move → ↓ MAX_INTEGRAL
+ * Jittery motion           → ↓ D
+ * Drifting / unstable hold → ↓ I
+ *
+ * ---------------------------------------------------------------
+ * TUNING ORDER
+ * ---------------------------------------------------------------
+ * 1. Set I = 0, D = 0
+ * 2. Increase P until slight oscillation
+ * 3. Reduce P ~20–30%
+ * 4. Add D to reduce overshoot
+ * 5. Add I ONLY if needed
+ * 6. Adjust MAX_INTEGRAL
+ *
+ * ---------------------------------------------------------------
+ * IMPORTANT IMPLEMENTATION NOTES
+ * ---------------------------------------------------------------
+ * - delta_time must be in seconds (micros() / 1e6)
+ * - integral += error * delta_time
+ * - derivative = (error - prev_error) / delta_time
+ * - Clamp integral to prevent windup
+ * - Deadband (MAX_VELOCITY) can cause early stopping
+ *
+ * ===============================================================
+ */
+
 #ifndef step_h
 #define step_h
-
-//#define EJECTOR_MOTOR_SPEED 100
 
 #include "Arduino.h"
 #include "Encoder.h"
 
 #define NUM_JOINTS 8
 #define GEAR_RATIO 5.076923077
+
+#define MIN_FREQUANCY 100.0
+
+#define MIN_VELOCITY 0.00075
+
+#define PROPORTIONAL_GAIN 1.0
+#define DERIVATIVE_GAIN 0.000025
+#define INTERGRAL_GAIN 0.0000000001
+
+#define MAX_INTEGRAL 1
 
 class Stepper {
 public:
@@ -38,6 +163,7 @@ public:
    void read_encoders();
    void motorTask();
    void motorReset();
+   void setCords();
    void resetEncoder();
 
 private:
@@ -70,10 +196,6 @@ private:
 
    // Varables for pid_controller()
    double integral;
-   double proportional_gain;
-   double integral_gain;
-   double derivative_gain;
-   double max_integral;
    double previous_error;
    int previous_time;
 

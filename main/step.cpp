@@ -11,14 +11,18 @@
 
 
 Stepper::Stepper(
-  int8_t motor_ID_In,
-  bool closedLoop_In,
-  int8_t stepPin_ID_In,
-  int8_t directionPin_ID_In,
-  int8_t encoderPinA_ID_In,
-  int8_t encoderPinB_ID_In,
-  int encoderResolution_In)
-  : encoder(encoderPinA_ID_In, encoderPinB_ID_In) {
+      int8_t motor_ID_In,
+      bool closedLoop_In,
+      int8_t stepPin_ID_In,
+      int8_t directionPin_ID_In,
+      int8_t encoderPinA_ID_In,
+      int8_t encoderPinB_ID_In,
+      int encoderResolution_In
+    )
+    : encoder(encoderPinA_ID_In, encoderPinB_ID_In) 
+{
+  static const int32_t initalCoords [NUM_JOINTS] = {-4300, 0, -10600, 0, -11800, 0, 0, 0};
+
   motor_ID = motor_ID_In;
   closedLoop = closedLoop_In;
   stepPin_ID = stepPin_ID_In;
@@ -27,13 +31,10 @@ Stepper::Stepper(
   encoderPinB_ID_In = encoderPinB_ID_In;
   encoderResolution = encoderResolution_In;
 
-  positionCommand = 0;
-  econderPosition = 0;
+  positionCommand = rad_to_step(initalCoords[motor_ID - 1]);
+  econderPosition = rad_to_step(initalCoords[motor_ID - 1]);
 
-  proportional_gain = 0.5;  // Max: 0.85 TODO: CHECK MIN
-  integral_gain = 0.05;
-  derivative_gain = 0.01;
-  max_integral = 1;
+  encoder.write(rad_to_step(initalCoords[motor_ID - 1]));
 
   pinMode(stepPin_ID, OUTPUT);
   pinMode(directionPin_ID, OUTPUT);
@@ -42,9 +43,6 @@ Stepper::Stepper(
   tasks.elapsedTime = 0;
   tasks.period = 1000000;
 
-
-  if (closedLoop)
-    encoder.write(0);
 }
 
 int32_t Stepper::getEncoderPosition() const {
@@ -85,14 +83,14 @@ void Stepper::motorTask()  // Sets a new frequency
   }
 
   // clamp the motor frequency
-  if (fabs(velocity) < 0.001) {
+  if (fabs(velocity) < MIN_VELOCITY) {
     motorFrequency = 1000000;
   } else {
     motorFrequency = (1000 / abs(velocity));
   }
 
-  if (motorFrequency <= 150) {
-    motorFrequency = 150;
+  if (motorFrequency <= MIN_FREQUANCY) {
+    motorFrequency = MIN_FREQUANCY;
   }
 
   tasks.period = motorFrequency;  // Need to test this, make sure it's right
@@ -108,28 +106,34 @@ void Stepper::motorTask()  // Sets a new frequency
  * 
  * TODO: Tune the PID controllers
  */
-double Stepper::pid_controller(double desired_angle, double current_pos) {
+double Stepper::pid_controller(double desired_angle, double current_pos) 
+{
   double now_time = micros();
-  double delta_time = now_time - previous_time;
+  double delta_time = (now_time - previous_time) / 1e6;
   double error;
   double derivative;
 
   previous_time = now_time;
 
   error = desired_angle - current_pos;
-  integral += error;
-  derivative = (error - previous_error) / delta_time;
+  integral += error * delta_time;
+
+  if (delta_time > 0) {
+    derivative = (error - previous_error) / delta_time;
+  } else {
+    derivative = 0;
+  }
 
   // clamp the integral
-  if (integral > max_integral) {
-    integral = max_integral;
-  } else if (integral < -max_integral) {
-    integral = -max_integral;
+  if (integral > MAX_INTEGRAL) {
+    integral = MAX_INTEGRAL;
+  } else if (integral < -MAX_INTEGRAL) {
+    integral = -MAX_INTEGRAL;
   }
 
   previous_error = error;
 
-  return velocity = error * proportional_gain + integral * integral_gain + derivative * derivative_gain;
+  return velocity = error * PROPORTIONAL_GAIN + integral * INTERGRAL_GAIN + derivative * DERIVATIVE_GAIN;
 }
 
 // ISR Function
@@ -192,6 +196,7 @@ void Stepper::resetEncoder() {
   encoder.write(0);
 }
 
+
 /**
  * @brief Converts an angle in radians to the equivalent number of motor steps.
  *
@@ -205,7 +210,7 @@ void Stepper::resetEncoder() {
  * @return Equivalent step count for the stepper motor.
  */
 int32_t Stepper::rad_to_step(int32_t rad) const {
-  return (int32_t)((rad * GEAR_RATIO * encoderResolution * 4) / (100.0 * 2.0 * PI));
+  return (int32_t)((rad * GEAR_RATIO * encoderResolution * 4) / (10000.0 * 2.0 * PI));
 }
 
 /**
@@ -221,5 +226,5 @@ int32_t Stepper::rad_to_step(int32_t rad) const {
  * @return Angle in radians corresponding to the given step count.
  */
 int32_t Stepper::step_to_rad(int32_t step) const {
-  return (int32_t)((step * 100.0 * 2.0 * PI) / (GEAR_RATIO * encoderResolution * 4));
+  return (int32_t)((step * 10000.0 * 2.0 * PI) / (GEAR_RATIO * encoderResolution * 4));
 }

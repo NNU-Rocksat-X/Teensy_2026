@@ -12,17 +12,19 @@ const bool zeroingEnabled = true;
 
 //  ***************************************** Task Schedualing Globals *****************************************
 
-const bool Jetson_Comm_Enable = true;
+const bool Jetson_Comm_Enable = false;
 const bool Positions_Readout_Enable = true;
 const bool Motor_Task_Enable = true;
+const bool Motor_Test_Enable = false; // if this is true then Jetson_Comm_Enable and Positions_Readout_Enable should be false
 
-#define NUM_TASKS 4
+#define NUM_TASKS 5
 #define ISR_BASE_uS 10 // µs
 
 #define RX_PERIOD_uS     12500 // µs
 #define TX_PERIOD_uS     12500 // µs
 #define PRINT_PERIOD_uS  500000 // µs
 #define MOTOR_PERIOD_uS  1  // run every time
+#define MOTOR_TEST_PERIOD_uS 100000
 
 typedef struct task
 {
@@ -77,28 +79,6 @@ int main(void)
   //zeroing();
   loop();
 }
-/*
-void loop(void) 
-{
-  while (1)
-  {
-    // Serial Receive
-    receive_command();
-
-    // Check Each Motor
-    motor_task();
-
-    // Serial Send
-    send_status();
-
-    print_encoder_values();
-    print_target_values();
-    Serial.println(" ");
-
-    delay(10);
-  }
-}
-*/
 
 void loop(void)
 {
@@ -117,7 +97,8 @@ void loop(void)
 
 
 //****************************************    Low Level Code       ****************************************
-void setup(void) {
+void setup(void) 
+{
   
   Serial.begin(115200);
   Serial.println("Setup will begin ");
@@ -133,6 +114,12 @@ void setup(void) {
   //Serial.begin(115200);
 
   initTasks();
+
+  /*
+  for(int i = 0; i < NUM_JOINTS; ++i)
+  {
+    myStepper[i].setCords();
+  }*/
   
   Serial.println("Setup Complete");
 
@@ -164,6 +151,13 @@ void initTasks()
   tasks[3].runFlag = false;
   tasks[3].enable = Motor_Task_Enable;
   tasks[3].TickFct = &motor_task;
+
+  tasks[4].period = MOTOR_TEST_PERIOD_uS/ISR_BASE_uS;
+  tasks[4].elapsedTime = MOTOR_TEST_PERIOD_uS/ISR_BASE_uS;
+  tasks[4].runFlag = false;
+  tasks[4].enable = Motor_Test_Enable;
+  tasks[4].TickFct = &motor_test;
+
 }
 
 
@@ -422,41 +416,88 @@ bool readGPIOFast(int pin)
 
 
 //****************************************    Test Functions       ****************************************
-void motor_test(int tested_motor, int speed)
-{/*
-  Serial.print("Testing Motor ");
-  Serial.print(tested_motor);
-  Serial.println(" ");
 
-  int i;
+void motor_test() 
+{
+  static bool waiting_for_input = true;
+  static int motor_num = -1;   // 1–8 (user input)
+  static int motor_idx = -1;   // 0–7 (array index)
+  static int target_pos = 0;
+  static bool moving = false;
 
-  --tested_motor;   // this is so that the above comment is true
-
-  while(1)
+  // -------------------- GET INPUT --------------------
+  if (waiting_for_input)
   {
-
-    tasks[tested_motor].period = myStepper[tested_motor].newFrequency(0, speed);
-
-    for (i = 0; i < NUM_JOINTS - NUM_EJCT_JOINTS; ++i) 
+    if (Serial.available())
     {
-      if (i != tested_motor)
+      Serial.println("\nEnter: <motor 1-8> <position>");
+      
+      motor_num = Serial.parseInt();
+      target_pos = Serial.parseInt();
+
+      if (motor_num >= 1 && motor_num <= NUM_JOINTS)
       {
-        tasks[i].period = myStepper[i].newFrequency(myEncoder[i].read(), 0);
-      } 
-    } /// Keep other motors where they are
-    for (i = NUM_JOINTS - NUM_EJCT_JOINTS; i < NUM_EJCT_JOINTS; ++i)
+        motor_idx = motor_num - 1;
+
+        myStepper[motor_idx].setPositionCommand(target_pos);
+
+        Serial.print("Motor ");
+        Serial.print(motor_num);
+        Serial.print(" -> Target: ");
+        Serial.println(target_pos);
+        Serial.println("Press 's' to stop.");
+
+        moving = true;
+        waiting_for_input = false;
+      }
+      /*else if (motor_num = 99)
+      {
+        for(i = 0; i < )
+      }*/
+      else
+      {
+        Serial.println("Invalid motor number (1-8).");
+        Serial.read(); // clear buffer
+      }
+    }
+  }
+
+  // -------------------- MOVING STATE --------------------
+  else if (moving)
+  {
+    int32_t pos = myStepper[motor_idx].getEncoderPosition();
+
+    Serial.print("Current: ");
+    Serial.println(pos);
+
+    // Stop command
+    if (Serial.available())
     {
-      if (i != tested_motor)
+      char c = Serial.read();
+      if (c == 's' || c == 'S')
       {
-        tasks[i].period = myStepper[i].newFrequency(0, 0);
+        Serial.println("STOPPED");
+
+        // Hold current position
+        myStepper[motor_idx].setPositionCommand(pos);
+
+        moving = false;
+        waiting_for_input = true;
+        return;
       }
     }
 
-    //print_encoder_values();
+    // Check if reached target
+    if (abs(pos - target_pos) < 2)
+    {
+      Serial.println("Reached target.");
 
-    delay(10);
-  }*/
+      moving = false;
+      waiting_for_input = true;
+    }
+  }
 }
+
 
 
 //****************************************      Print Functions       ****************************************
@@ -478,21 +519,34 @@ void print_lim_switches (int motor_in, int failure)
 
 void print_encoder_values (void)
 {
+  char buf[13]; // 6 chars + null terminator
+
   // Encoder readout  
+
+  Serial.print("Current: ");
+
   for ( int ii = 0; ii < NUM_JOINTS; ++ii)
   {
-    Serial.print(myStepper[ii].getEncoderPosition());
-    Serial.print(" ");
+    snprintf(buf, sizeof(buf), "%012ld", myStepper[ii].getEncoderPosition());
+    Serial.print(buf);
+    Serial.print("   ");
   }
   Serial.println(" ");
 }
 
 void print_target_values (void)
 {
-  for ( int i = 0; i < NUM_JOINTS; ++i)
+    char buf[13]; // 6 chars + null terminator
+
+  // Encoder readout  
+
+  Serial.print("Target:  ");
+
+  for ( int ii = 0; ii < NUM_JOINTS; ++ii)
   {
-    Serial.print(myStepper[i].getPositionCommand());
-    Serial.print(" ");
+    snprintf(buf, sizeof(buf), "%012ld", myStepper[ii].getPositionCommand());
+    Serial.print(buf);
+    Serial.print("   ");
   }
-  Serial.println(" ");
+  Serial.println(" "); 
 }
