@@ -12,10 +12,10 @@ const bool zeroingEnabled = true;
 
 //  ***************************************** Task Schedualing Globals *****************************************
 
-const bool Jetson_Comm_Enable = false;
-const bool Positions_Readout_Enable = false;
+const bool Jetson_Comm_Enable = true;
+const bool Positions_Readout_Enable = true;
 const bool Motor_Task_Enable = true;
-const bool Motor_Test_Enable = true; // if this is true then Jetson_Comm_Enable and Positions_Readout_Enable should be false
+const bool Motor_Test_Enable = false;   // if this is true then Jetson_Comm_Enable and Positions_Readout_Enable should be false
 
 #define NUM_TASKS 5
 #define ISR_BASE_uS 10 // µs

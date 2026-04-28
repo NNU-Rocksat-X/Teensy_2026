@@ -134,11 +134,13 @@
 
 #define MIN_VELOCITY 0.00075
 
-#define PROPORTIONAL_GAIN 1.0
-#define DERIVATIVE_GAIN 0.000025
-#define INTERGRAL_GAIN 0.0000000001
+#define PROPORTIONAL_GAIN 0.6
+#define DERIVATIVE_GAIN  0.00//0025
+#define INTERGRAL_GAIN 0.0//1
 
 #define MAX_INTEGRAL 1
+
+#define MAX_ERROR 10
 
 class Stepper {
 public:
@@ -189,7 +191,6 @@ private:
    // Varables for motorTask()
    bool direction;
    int motorFrequency;
-   double velocity;
 
    //Varables for step()
    bool highLow;

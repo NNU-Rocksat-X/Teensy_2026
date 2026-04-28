@@ -60,40 +60,59 @@ void Stepper::setPositionCommand(int32_t input) {
 
 void Stepper::motorTask()  // Sets a new frequency
 {
-  int velocity;
-  velocity = pid_controller(positionCommand, econderPosition);
 
-  if (closedLoop) {
-    econderPosition = encoder.read();
-  }
-
-  if (true)  // All Joints  (put motor_ID == 1 through motor_ID == 6 if you need to flip motor 7 polarity)
+  // Hard Clamp of Movement
+  if (abs(positionCommand - econderPosition) < MAX_ERROR) 
   {
-    if (velocity > 0) {
-      direction = HIGH;
-    } else {
-      direction = LOW;
+    tasks.period = 1000000;
+  } 
+  else 
+  {
+
+    // PID Control
+    double velocity;
+    velocity = pid_controller(positionCommand, econderPosition);
+
+    if (closedLoop) {
+      econderPosition = encoder.read();
     }
-  } else {
-    if (velocity > 0) {
-      direction = LOW;
-    } else {
-      direction = HIGH;
+
+    if (true)  // All Joints  (put motor_ID == 1 through motor_ID == 6 if you need to flip motor 7 polarity)
+    {
+      if (velocity > 0) 
+      {
+        direction = HIGH;
+      } 
+      else 
+      {
+        direction = LOW;
+      }
+    } 
+    else 
+    {
+      if (velocity > 0) {
+        direction = LOW;
+      } else {
+        direction = HIGH;
+      }
     }
-  }
 
-  // clamp the motor frequency
-  if (fabs(velocity) < MIN_VELOCITY) {
-    motorFrequency = 1000000;
-  } else {
-    motorFrequency = (1000 / abs(velocity));
-  }
+    // clamp the motor frequency
+    if (fabs(velocity) < MIN_VELOCITY) 
+    {
+      motorFrequency = 1000000;
+    } 
+    else 
+    {
+      motorFrequency = (1000 / abs(velocity));
+    }
 
-  if (motorFrequency <= MIN_FREQUANCY) {
-    motorFrequency = MIN_FREQUANCY;
-  }
+    if (motorFrequency <= MIN_FREQUANCY) {
+      motorFrequency = MIN_FREQUANCY;
+    }
 
-  tasks.period = motorFrequency;  // Need to test this, make sure it's right
+    tasks.period = motorFrequency;
+  }
 }
 
 /**
@@ -116,6 +135,7 @@ double Stepper::pid_controller(double desired_angle, double current_pos)
   previous_time = now_time;
 
   error = desired_angle - current_pos;
+
   integral += error * delta_time;
 
   if (delta_time > 0) {
@@ -133,7 +153,10 @@ double Stepper::pid_controller(double desired_angle, double current_pos)
 
   previous_error = error;
 
-  return velocity = error * PROPORTIONAL_GAIN + integral * INTERGRAL_GAIN + derivative * DERIVATIVE_GAIN;
+   
+  double velocity = error * PROPORTIONAL_GAIN + integral * INTERGRAL_GAIN + derivative * DERIVATIVE_GAIN;
+  
+  return velocity;
 }
 
 // ISR Function
