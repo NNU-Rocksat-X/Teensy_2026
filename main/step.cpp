@@ -64,6 +64,11 @@ void Stepper::motorTask()  // Sets a new frequency
   // Hard Clamp of Movement
   if (abs(positionCommand - econderPosition) < MAX_ERROR) 
   {
+    if (closedLoop) 
+    {
+      econderPosition = encoder.read();
+    }
+    
     tasks.period = 1000000;
   } 
   else 

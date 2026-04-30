@@ -60,14 +60,14 @@ Stepper::Stepper(
   */
 Stepper myStepper[] = 
 {//      motor_ID   ClosedLoop    stepPin   dirPin    encoderPin_A    encoderPin_B  encoderRes.
-  Stepper(1,        1,            3,        2,        14,             15,           1000  ),
-  Stepper(2,        1,            5,        4,        16,             17,           1000   ),
-  Stepper(3,        1,            7,        6,        18,             19,           1000  ), 
-  Stepper(4,        1,            9,        8,        21,             20,           1000   ),
-  Stepper(5,        1,            11,       10,       23,             22,           1000  ),
-  Stepper(6,        1,            13,       12,       25,             24,           1000   ),
-  Stepper(7,        1,            28,       29,       27,             26,           1000  ),
-  Stepper(8,        1,            28,       29,       27,             26,           1000  )
+  Stepper(1,        true,          3,        2,        14,             15,           1000  ),
+  Stepper(2,        true,          5,        4,        16,             17,           1000   ),
+  Stepper(3,        true,          7,        6,        18,             19,           1000  ), 
+  Stepper(4,        true,          9,        8,        21,             20,           1000   ),
+  Stepper(5,        true,          11,       10,       23,             22,           1000  ),
+  Stepper(6,        true,          13,       12,       25,             24,           1000   ),
+  Stepper(7,        true,          28,       29,       27,             26,           1000  ),
+  Stepper(8,        true,          28,       29,       27,             26,           1000  )
 };
 
 
@@ -516,18 +516,22 @@ void print_lim_switches (int motor_in, int failure)
     Serial.println(" ");
   }
 }
-
 void print_encoder_values (void)
 {
-  char buf[13]; // 6 chars + null terminator
-
-  // Encoder readout  
+  char buf[20];
 
   Serial.print("Current: ");
 
   for ( int ii = 0; ii < NUM_JOINTS; ++ii)
   {
-    snprintf(buf, sizeof(buf), "%012ld", myStepper[ii].getEncoderPosition());
+    long val = myStepper[ii].getEncoderPosition();
+    long absval = abs(val);
+    long whole  = absval / 10000;
+    long frac   = absval % 10000;
+    if (val < 0)
+      snprintf(buf, sizeof(buf), "-%ld.%04ld", whole, frac);
+    else
+      snprintf(buf, sizeof(buf), " %ld.%04ld", whole, frac);
     Serial.print(buf);
     Serial.print("   ");
   }
@@ -536,17 +540,22 @@ void print_encoder_values (void)
 
 void print_target_values (void)
 {
-    char buf[13]; // 6 chars + null terminator
-
-  // Encoder readout  
+  char buf[20];
 
   Serial.print("Target:  ");
 
   for ( int ii = 0; ii < NUM_JOINTS; ++ii)
   {
-    snprintf(buf, sizeof(buf), "%012ld", myStepper[ii].getPositionCommand());
+    long val = myStepper[ii].getPositionCommand();
+    long absval = abs(val);
+    long whole  = absval / 10000;
+    long frac   = absval % 10000;
+    if (val < 0)
+      snprintf(buf, sizeof(buf), "-%ld.%04ld", whole, frac);
+    else
+      snprintf(buf, sizeof(buf), " %ld.%04ld", whole, frac);
     Serial.print(buf);
     Serial.print("   ");
   }
-  Serial.println(" "); 
+  Serial.println(" ");
 }
